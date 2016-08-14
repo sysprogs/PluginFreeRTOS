@@ -24,6 +24,8 @@
 // SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 
 using System;
+using System.Linq;
+using System.Collections;
 using System.Collections.Generic;
 using System.Text.RegularExpressions;
 using VisualGDBExtensibility;
@@ -35,13 +37,18 @@ namespace PluginFreeRTOS
         CPU_ARM_CORTEX_M0, CPU_ARM_CORTEX_M3, CPU_ARM_CORTEX_M4, CPU_UNIDENTIFIED
     };
 
-    public class VirtualThreadProvider : IVirtualThreadProvider
+    enum StackLayout
     {
-        CPUTypes? CPUType;
+        WithOptionalFPU,
+        WithoutFPU
+    }
+
+    public class VirtualThreadProvider : IVirtualThreadProvider2
+    {
+        StackLayout? _StackLayout;
 
         public VirtualThreadProvider()
         {
-            CPUType = null;
         }
 
         CPUTypes? GetCPUType(IGlobalExpressionEvaluator e)
@@ -75,6 +82,9 @@ namespace PluginFreeRTOS
             if (!threadsInListCount.HasValue || threadsInListCount == 0)
                 return threads;
 
+            if (threadsInListCount < 0 || threadsInListCount > 4096)
+                return threads; //We have most likely read something wrong. Cancel thread evaluation.
+
             // Get the first list item in that list, and the corresponding task control block
             UInt64 currentListItem = (UInt64)e.EvaluateIntegralExpression(listName + ".xListEnd.pxNext");
             UInt64 currentTCB = (UInt64)e.EvaluateIntegralExpression(string.Format("((ListItem_t*)0x{0:x})->pvOwner", currentListItem));
@@ -87,38 +97,50 @@ namespace PluginFreeRTOS
                 // Get task name
                 string name = e.EvaluateRawExpression(string.Format("((TCB_t*)0x{0:x})->pcTaskName", currentTCB));
 
+                ulong? id = e.EvaluateIntegralExpression(string.Format("((TCB_t*)0x{0:x})->uxTCBNumber", currentTCB));
+                int threadId;
+                if (id.HasValue)
+                    threadId = (int)id.Value;
+                else
+                    threadId = (int.MaxValue / 2) + currentThread;
+
                 // Trim null characters (\000) and quotes from the name
                 Regex rgx = new Regex("\\\"(.*)\\\"(.*)");
                 name = name.Replace("\\000", "");
                 name = rgx.Replace(name, "$1");
 
                 // Add this thread to the list
-                threads.Add(new VirtualThread(CPUType, // CPU type
+                threads.Add(new VirtualThread(_StackLayout.Value, // CPU type
                                               name, // task name
                                               savedSP, // stack pointer
-                                              currentThread++, // index
+                                              threadId, // index
                                               pxCurrentTCB == currentTCB, // is currently running? (yes if equality holds)
                                               e)); // evaluator
 
                 // Iterate to next list item and TCB
                 currentListItem = (UInt64)e.EvaluateIntegralExpression(string.Format("((ListItem_t*)0x{0:x})->pxNext", currentListItem));
                 currentTCB = (UInt64)e.EvaluateIntegralExpression(string.Format("((ListItem_t*)0x{0:x})->pvOwner", currentListItem));
+
+                currentThread++;
             }
 
             return threads;
         }
+
+        static readonly Regex rgDisassemblyLine = new Regex("[ \t=>]+0x[0-9a-fA-F]+[ \t]*<[^<>]*\\+[^<>]*>:");
+
         public IVirtualThread[] GetVirtualThreads(
             IGlobalExpressionEvaluator e)
         {
             // Get the total number of tasks running
             int taskCount = (int)e.EvaluateIntegralExpression("uxCurrentNumberOfTasks");
-            
+
             // Get the number of different priorities (i.e. configMAX_PRIORITIES) --
             // there is a ready task list for each possible priority
             int priorityCount = (int)e.EvaluateIntegralExpression("sizeof(pxReadyTasksLists)/sizeof(pxReadyTasksLists[0])");
-            
+
             List<IVirtualThread> threads = new List<IVirtualThread>();
-            
+
             // Get a pointer to the current TCB -- it's used to compare to the TCB of
             // each list found below, and a match means it's the currently running task
             UInt64? pxCurrentTCB = e.EvaluateIntegralExpression("pxCurrentTCB");
@@ -126,8 +148,20 @@ namespace PluginFreeRTOS
 
             // If the CPU type hasn't been found yet, do it -- it's necessary to find
             // out the stack layout later on
-            if (!CPUType.HasValue)
-                CPUType = GetCPUType(e);
+
+            if (!_StackLayout.HasValue)
+            {
+                int disassemblyLines = e.GDBSession.ExecuteCommand("disassemble PendSV_Handler").AdditionalOutput?.Count(s => rgDisassemblyLine.IsMatch(s)) ?? 0;
+                if (disassemblyLines == 21)
+                    _StackLayout = StackLayout.WithoutFPU;
+                else if (disassemblyLines == 30 || disassemblyLines == 32)
+                    _StackLayout = StackLayout.WithOptionalFPU;
+                else
+                {
+                    var cpu = GetCPUType(e);
+                    _StackLayout = (cpu == CPUTypes.CPU_ARM_CORTEX_M4) ? StackLayout.WithOptionalFPU : StackLayout.WithoutFPU;
+                }
+            }
 
             // Find tasks in ready lists -- one for each possible priority in FreeRTOS
             for (int i = 0; i < priorityCount; i++)
@@ -158,24 +192,43 @@ namespace PluginFreeRTOS
 
             return threads.ToArray();
         }
+
+        public int? GetActiveVirtualThreadId(IGlobalExpressionEvaluator evaluator)
+        {
+            return (int?)evaluator.EvaluateIntegralExpression("pxCurrentTCB->uxTCBNumber");
+        }
+
+        public IEnumerable CreateToolbarContents()
+        {
+            return null;
+        }
+
+        public void SetConfiguration(Dictionary<string, string> savedConfiguration)
+        {
+        }
+
+        public Dictionary<string, string> GetConfigurationIfChanged()
+        {
+            return null;
+        }
     }
 
     class VirtualThread : IVirtualThread
     {
-        CPUTypes? _CPUType;
         private UInt64 _SavedSP;
         private string _Name;
-        int _Index;
+        int _UniqueID;
         IGlobalExpressionEvaluator _Evaluator;
         bool _IsRunning;
+        private StackLayout _StackLayout;
 
-        public VirtualThread(CPUTypes? CPUType, string name, UInt64 savedSP, int index, bool isRunning,
+        public VirtualThread(StackLayout stackLayout, string name, UInt64 savedSP, int id, bool isRunning,
                              IGlobalExpressionEvaluator evaluator)
         {
-            _CPUType = CPUType;
+            _StackLayout = stackLayout;
             _SavedSP = savedSP;
             _Name = name;
-            _Index = index;
+            _UniqueID = id;
             _IsRunning = isRunning;
             _Evaluator = evaluator;
         }
@@ -208,7 +261,7 @@ namespace PluginFreeRTOS
             int stackOffset;
 
             // List of registers in the order they are stacked
-            string[] registers = { "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r14"};
+            string[] registers = { "r4", "r5", "r6", "r7", "r8", "r9", "r10", "r11", "r14" };
             string[] registers2 = { "r0", "r1", "r2", "r3", "r12", "r14", "r15", "cpsr" };
 
             // Get registers r4-r11 (the first stacked registers for all Cortex-M processors)
@@ -224,7 +277,7 @@ namespace PluginFreeRTOS
 
             ulong r14_exc = 0;
 
-            if (_CPUType == CPUTypes.CPU_ARM_CORTEX_M4)
+            if (_StackLayout == StackLayout.WithOptionalFPU)
             {
                 // FreeRTOS stacks r14 after r11, but only for Cortex-M4; this is necessary
                 // to check whether bit 4 is set, which controls whether FPU registers were
@@ -265,7 +318,7 @@ namespace PluginFreeRTOS
 
             stackOffset += 8;
 
-            if (_CPUType == CPUTypes.CPU_ARM_CORTEX_M4)
+            if (_StackLayout == StackLayout.WithOptionalFPU)
             {
                 // Again check whether bit 4 is set in r14; if it is, additional FPU registers
                 // were stacked by the Cortex core
@@ -309,7 +362,7 @@ namespace PluginFreeRTOS
 
         public int UniqueID
         {
-            get { return _Index + 1; }
+            get { return _UniqueID; }
         }
     }
 }
