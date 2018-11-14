@@ -50,7 +50,7 @@ namespace PluginFreeRTOS
         public VirtualThreadProvider()
         {
         }
-
+        
         CPUTypes? GetCPUType(IGlobalExpressionEvaluator e)
         {
             // Reads CPUID register in SCB
@@ -152,9 +152,12 @@ namespace PluginFreeRTOS
             if (!_StackLayout.HasValue)
             {
                 int disassemblyLines = e.GDBSession.ExecuteCommand("disassemble PendSV_Handler").AdditionalOutput?.Count(s => rgDisassemblyLine.IsMatch(s)) ?? 0;
-                if (disassemblyLines == 21)
+                if (disassemblyLines == 0)
+                    disassemblyLines = e.GDBSession.ExecuteCommand("disassemble xPortPendSVHandler").AdditionalOutput?.Count(s => rgDisassemblyLine.IsMatch(s)) ?? 0;
+
+                if (disassemblyLines >= 21 && disassemblyLines <= 22)
                     _StackLayout = StackLayout.WithoutFPU;
-                else if (disassemblyLines == 30 || disassemblyLines == 32)
+                else if (disassemblyLines >= 30 && disassemblyLines <= 33)
                     _StackLayout = StackLayout.WithOptionalFPU;
                 else
                 {
