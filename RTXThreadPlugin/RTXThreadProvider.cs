@@ -29,10 +29,14 @@ namespace RTXThreadPlugin
             return null;
         }
 
-        void ReportThreadList(List<IVirtualThread> result, IGlobalExpressionEvaluator expressionEvaluator, string expression)
+        void ReportThreadList(List<IVirtualThread> result, IGlobalExpressionEvaluator expressionEvaluator, string expression, HashSet<ulong> reportedIDs)
         {
             for (ulong? addr = expressionEvaluator.EvaluateIntegralExpression(expression); addr.HasValue && addr != 0; addr = expressionEvaluator.EvaluateIntegralExpression($"(({ThreadTypeName} *)0x{addr.Value:x8})->thread_next"))
             {
+                if (reportedIDs.Contains(addr.Value))
+                    continue;
+
+                reportedIDs.Add(addr.Value);
                 result.Add(new RTXThread(this, addr.Value, expressionEvaluator));
             }
         }
@@ -49,10 +53,11 @@ namespace RTXThreadPlugin
             if (!thr.HasValue || thr == 0)
                 return new IVirtualThread[0];
 
+            HashSet<ulong> reportedIDs = new HashSet<ulong> { thr.Value };
             result.Add(new RTXThread(this, thr.Value, expressionEvaluator, true));
-            ReportThreadList(result, expressionEvaluator, "osRtxInfo.thread.ready.thread_list");
-            ReportThreadList(result, expressionEvaluator, "osRtxInfo.thread.delay_list");
-            ReportThreadList(result, expressionEvaluator, "osRtxInfo.thread.wait_list");
+            ReportThreadList(result, expressionEvaluator, "osRtxInfo.thread.ready.thread_list", reportedIDs);
+            ReportThreadList(result, expressionEvaluator, "osRtxInfo.thread.delay_list", reportedIDs);
+            ReportThreadList(result, expressionEvaluator, "osRtxInfo.thread.wait_list", reportedIDs);
             return result.ToArray();
         }
 
@@ -71,7 +76,7 @@ namespace RTXThreadPlugin
                 var insns = evaluator.DisassembleMemory("SVC_ContextSave", 10) ?? new SimpleInstruction[0];
                 bool hasFP = false;
                 //This is a basic check to distinguish between known stack layouts. It is not trying to actually reconstruct the stack layout by analyzing the disassembly.
-                foreach(var insn in insns)
+                foreach (var insn in insns)
                 {
                     if (insn.Text?.ToLower()?.Contains("vstmdbeq") == true)
                     {
@@ -142,12 +147,12 @@ namespace RTXThreadPlugin
             {
                 var bytes = evaluator.ReadMemoryBlock($"0x{sp:x8}", _Position) ?? new byte[0];
                 List<KeyValuePair<string, ulong>> result = new List<KeyValuePair<string, ulong>>();
-                foreach(var rec in _AllRegisters)
+                foreach (var rec in _AllRegisters)
                 {
                     if (rec.EndOffset > bytes.Length)
                         continue;   //Unavailable
 
-                    switch(rec.Size)
+                    switch (rec.Size)
                     {
                         case 4:
                             result.Add(new KeyValuePair<string, ulong>(rec.Name, BitConverter.ToUInt32(bytes, rec.Offset)));
@@ -157,6 +162,8 @@ namespace RTXThreadPlugin
                             break;
                     }
                 }
+
+                result.Add(new KeyValuePair<string, ulong>("sp", sp + (ulong)_Position));
                 return result;
             }
         }
@@ -207,6 +214,7 @@ namespace RTXThreadPlugin
                 builder.AddRegisters("r", 0, 3);
                 builder.AddRegisters("r12", "lr", "pc");
 
+                builder.Skip(4);
                 return builder.FetchValues(sp, _Evaluator);
             }
         }
