@@ -43,6 +43,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="LiveWatch\FreeRTOSLiveWatchPlugin.cs" />
+    <Compile Include="LiveWatch\KernelNode.cs" />
+    <Compile Include="LiveWatch\NodeBase.cs" />
+    <Compile Include="LiveWatch\NodeSource.cs" />
+    <Compile Include="LiveWatch\QueueNodes.cs" />
+    <Compile Include="LiveWatch\ThreadLogic.cs" />
+    <Compile Include="LiveWatch\ThreadNodes.cs" />
     <Compile Include="PluginFreeRTOS.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
