@@ -42,6 +42,7 @@
     <Reference Include="WindowsBase" />
   </ItemGroup>
   <ItemGroup>
+    <Compile Include="LiveWatch\FreeRTOSLiveWatchPlugin.cs" />
     <Compile Include="PluginFreeRTOS.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
