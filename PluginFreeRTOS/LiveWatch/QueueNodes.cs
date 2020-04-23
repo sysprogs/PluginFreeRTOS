@@ -109,15 +109,90 @@ namespace PluginFreeRTOS.LiveWatch
         }
 
         Variables _Variables;
-        private ILiveWatchNode _QueueNode;
+        private ILiveWatchNode _QueueObjectNode;
 
         WaitingThreadsNode _ReadThreadQueue, _WriteThreadQueue;
 
-        class WaitingThreadsNode : ScalarNodeBase
+        public class WaitingThreadsNode : ScalarNodeBase
         {
-            public WaitingThreadsNode(string uniqueID)
-                : base(uniqueID)
+            private QueueNode _Queue;
+            private ThreadList _ThreadList;
+
+            public readonly ulong QueueAddress;
+
+            public WaitingThreadsNode(QueueNode queue, string idSuffix, string name, string memberName)
+                : base(queue.UniqueID + idSuffix)
             {
+                _Queue = queue;
+                Name = name;
+
+                QueueAddress = _Queue._QueueVariable.Address;
+                var threadListVariable = _Queue._QueueVariable.LookupSpecificChild(memberName);
+                _ThreadList = ThreadList.Locate(_Queue._Engine, threadListVariable, ThreadListType.Event, _Queue._Root.xEventListItem_Offset, true);
+                _Queue._Root.OnQueueNodeSuspended(this, false);
+                SelectedFormatter = _Queue._Engine.CreateDefaultFormatter(ScalarVariableType.SInt32);
+            }
+
+            public override void SetSuspendState(LiveWatchNodeSuspendState state)
+            {
+                base.SetSuspendState(state);
+                if (_ThreadList != null)
+                    _ThreadList.SuspendUpdating = state.SuspendRegularUpdates;
+                _Queue._Root.OnQueueNodeSuspended(this, state.SuspendRegularUpdates);
+            }
+
+            ulong[] RunSingleDiscoveryIteration(out int expectedCount, LiveVariableQueryMode queryMode = LiveVariableQueryMode.UseCacheIfAvailable)
+            {
+                expectedCount = (int)(_ThreadList?.uxNumberOfItems?.GetValue().ToUlong() ?? 0);
+                if (expectedCount == 0)
+                    return new ulong[0];
+
+                Dictionary<ulong, ThreadListType> result = new Dictionary<ulong, ThreadListType>();
+                HashSet<ulong> processedNodes = new HashSet<ulong>();
+                _ThreadList.Walk(_Queue._Engine, result, processedNodes, expectedCount * 2, _Queue._Root.EventThreadListCache, queryMode);
+                return result.Keys.ToArray();
+            }
+
+            public override LiveWatchNodeState UpdateState(LiveWatchUpdateContext context)
+            {
+                if (_ThreadList == null)
+                    return base.UpdateState(context);
+
+                RawValue = _ThreadList.uxNumberOfItems.GetValue();
+
+                LiveVariableQueryMode queryMode = LiveVariableQueryMode.UseCacheIfAvailable;
+                ulong[] taskAddresses = null;
+                bool mismatch = true;
+
+                for (int iter = 0; iter < 3; iter++)
+                {
+                    taskAddresses = RunSingleDiscoveryIteration(out var expectedCount, queryMode);
+                    if (taskAddresses.Length == expectedCount)
+                    {
+                        mismatch = false;
+                        break;
+                    }
+                    queryMode = LiveVariableQueryMode.QueryDirectly;
+                }
+
+                string value = "---";
+                if (taskAddresses.Length > 0)
+                    value = string.Join(", ", taskAddresses.Select(_Queue._Root.GetThreadName).ToArray());
+
+                if (mismatch)
+                    value += " (imprecise)";
+
+                return new LiveWatchNodeState
+                {
+                    Value = value
+                };
+            }
+
+            public override void Dispose()
+            {
+                base.Dispose();
+                _ThreadList.Dispose();
+                _Queue._Root.OnQueueNodeSuspended(this, true);
             }
         }
 
@@ -157,7 +232,7 @@ namespace PluginFreeRTOS.LiveWatch
                 _Variables.LastKnownAddress = _QueueVariable.Address;
 
                 //The previous instance will get auto-disposed by VisualGDB.
-                _QueueNode = null;
+                _QueueObjectNode = null;
                 _Variables.Reset();
 
                 if (_QueueVariable.Address != 0)
@@ -170,25 +245,25 @@ namespace PluginFreeRTOS.LiveWatch
                 }
             }
 
-            if (context.PreloadChildren && _QueueVariable != null && _QueueNode == null && _QueueVariable.Address != 0)
+            if (context.PreloadChildren && _QueueVariable != null && _QueueObjectNode == null && _QueueVariable.Address != 0)
             {
-                _QueueNode = _Engine.CreateNodeForPinnedVariable(_QueueVariable, new LiveWatchNodeOverrides { Name = "[Object]" });
+                _QueueObjectNode = _Engine.CreateNodeForPinnedVariable(_QueueVariable, new LiveWatchNodeOverrides { Name = "[Object]" });
             }
 
             var result = new LiveWatchNodeState();
 
-            if (_QueueVariable.Address == 0)
+            if ((_QueueVariable?.Address ?? 0) == 0)
                 result.Value = "[NULL]";
             else if (_Variables.uxLength == null || _Variables.uxMessagesWaiting == null)
                 result.Value = "???";
             else
             {
+                var detectedType = _Descriptor.Type;
                 var rawValue = _Variables.uxMessagesWaiting.GetValue();
                 int value = (int)rawValue.ToUlong();
                 int maxValue = (int)_Variables.uxLength.GetValue().ToUlong();
                 ulong owner = 0, level = 0;
 
-                var detectedType = _Descriptor.Type;
                 if (detectedType != QueueType.Queue && _Variables.u_xSemaphore_xMutexHolder != null && _Variables.u_xSemaphore_uxRecursiveCallCount != null)
                 {
                     owner = _Variables.u_xSemaphore_xMutexHolder.GetValue().ToUlong();
@@ -238,14 +313,24 @@ namespace PluginFreeRTOS.LiveWatch
                         result.Icon = LiveWatchNodeIcon.Queue;
                         break;
                 }
-            }
 
-            if (context.PreloadChildren)
-            {
-                result.NewChildren = new[] { _QueueNode }.Where(n => n != null).ToArray();
+
+                if (context.PreloadChildren)
+                {
+                    ProvideWaitingThreadsNodes(detectedType);
+                    result.NewChildren = new[] { _ReadThreadQueue, _WriteThreadQueue, _QueueObjectNode }.Where(n => n != null).ToArray();
+                }
             }
 
             return result;
+        }
+
+        private void ProvideWaitingThreadsNodes(QueueType detectedType)
+        {
+            if (_ReadThreadQueue?.QueueAddress != _QueueVariable.Address)
+            {
+                _ReadThreadQueue = new WaitingThreadsNode(this, ".readers", "Waiting Threads", "xTasksWaitingToReceive");
+            }
         }
 
         public override void SetSuspendState(LiveWatchNodeSuspendState state)

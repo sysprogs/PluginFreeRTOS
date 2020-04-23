@@ -17,8 +17,9 @@ namespace PluginFreeRTOS.LiveWatch
         readonly IPinnedVariableStructType _QueueType;
         
         List<ThreadList> _AllThreadLists = new List<ThreadList>();  //e.g. xSuspendedTaskList
-        readonly LinkedListNodeCache _StateThreadListCache, _EventThreadListCache;
+        public readonly LinkedListNodeCache StateThreadListCache, EventThreadListCache;
         public readonly ILiveVariable _pxCurrentTCB, _uxCurrentNumberOfTasks;
+        public readonly uint xEventListItem_Offset;
 
         private ILiveWatchNode[] _Children;
 
@@ -30,13 +31,14 @@ namespace PluginFreeRTOS.LiveWatch
             _QueueType = (IPinnedVariableStructType)engine.Evaluator.LookupType("Queue_t");
 
             var xStateListItem_Offset = _TCBType.LookupMember("xStateListItem", true).Offset;
+            xEventListItem_Offset = _TCBType.LookupMember("xEventListItem", true).Offset;
 
             var listItemType = (IPinnedVariableStructType)engine.Evaluator.LookupType("ListItem_t", true);
             var pvOwner_Offset = (int)listItemType.LookupMember("pvOwner", true).Offset;
             var pxNext_Offset = (int)listItemType.LookupMember("pxNext", true).Offset;
 
-            _StateThreadListCache = new LinkedListNodeCache(engine, pvOwner_Offset, pxNext_Offset);
-            _EventThreadListCache = new LinkedListNodeCache(engine, pvOwner_Offset, pxNext_Offset);
+            StateThreadListCache = new LinkedListNodeCache(engine, pvOwner_Offset, pxNext_Offset);
+            EventThreadListCache = new LinkedListNodeCache(engine, pvOwner_Offset, pxNext_Offset);
 
             _pxCurrentTCB = engine.CreateLiveVariable("pxCurrentTCB", true);
             _uxCurrentNumberOfTasks = engine.CreateLiveVariable("uxCurrentNumberOfTasks", true);
@@ -59,8 +61,8 @@ namespace PluginFreeRTOS.LiveWatch
             _pxCurrentTCB.Dispose();
             _uxCurrentNumberOfTasks.Dispose();
 
-            _StateThreadListCache.Dispose();
-            _EventThreadListCache.Dispose();
+            StateThreadListCache.Dispose();
+            EventThreadListCache.Dispose();
         }
 
         Dictionary<ulong, ThreadNode> _CachedThreadNodes = new Dictionary<ulong, ThreadNode>();
@@ -76,7 +78,7 @@ namespace PluginFreeRTOS.LiveWatch
 
                 _pxCurrentTCB.SuspendUpdating = value;
                 _uxCurrentNumberOfTasks.SuspendUpdating = value;
-                _StateThreadListCache.SuspendUpdating = value;
+                StateThreadListCache.SuspendUpdating = value;
             }
         }
 
@@ -114,7 +116,7 @@ namespace PluginFreeRTOS.LiveWatch
 
         public ThreadNode[] RefreshThreadList()
         {
-            var foundThreads = new ThreadLookup(this, _AllThreadLists, true, _StateThreadListCache).DiscoverAllThreads();
+            var foundThreads = new ThreadLookup(this, _AllThreadLists, true, StateThreadListCache).DiscoverAllThreads();
             int generation = Interlocked.Increment(ref _ThreadListGeneration);
 
             foreach (var thr in foundThreads)
@@ -186,6 +188,24 @@ namespace PluginFreeRTOS.LiveWatch
             //We use a separate live variable, so that we can suspend it independently. VisualGDB will automatically sort out the redundancies if both variables are enabled.
             return GetThreadName(pxCurrentTCB.GetValue().ToUlong());
         }
+
+        HashSet<QueueNode.WaitingThreadsNode> _ActiveQueueNodes = new HashSet<QueueNode.WaitingThreadsNode>();
+
+        public void OnQueueNodeSuspended(QueueNode.WaitingThreadsNode queueNode, bool suspended)
+        {
+            bool hasNodes;
+            lock(_ActiveQueueNodes)
+            {
+                if (suspended)
+                    _ActiveQueueNodes.Remove(queueNode);
+                else
+                    _ActiveQueueNodes.Add(queueNode);
+
+                hasNodes = _ActiveQueueNodes.Count > 0;
+            }
+
+            StateThreadListCache.SuspendUpdating = hasNodes;
+        }
     }
 
     enum ThreadListType
@@ -195,5 +215,7 @@ namespace PluginFreeRTOS.LiveWatch
         Suspended,
         Running,
         Deleted,
+
+        Event,
     }
 }

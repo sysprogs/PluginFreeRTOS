@@ -17,7 +17,7 @@ namespace PluginFreeRTOS.LiveWatch
     {
         public readonly ThreadListType Type;
         public readonly ulong EndNodeAddress;
-        readonly ILiveVariable xListEnd_pxNext, uxNumberOfItems;
+        public readonly ILiveVariable xListEnd_pxNext, uxNumberOfItems;
         private readonly uint _ListItemOffsetInTCB;
         readonly string _Name;
 
@@ -85,7 +85,7 @@ namespace PluginFreeRTOS.LiveWatch
             xListEnd_pxNext.Dispose();
         }
 
-        public void Walk(NodeSource root,
+        public void Walk(ILiveWatchEngine engine,
                          Dictionary<ulong, ThreadListType> result,
                          HashSet<ulong> processedNodes,
                          int maxThreadsToLoad,
@@ -112,16 +112,24 @@ namespace PluginFreeRTOS.LiveWatch
 
                     if (pvOwner != pTCB)
                     {
-                        //The list node doesn't point to the object itself anymore. Most likely, it has been freed and reused.
-                        cachedListNode.RemoveFromCache();
-                        continue;   
+                        if ((uint)pvOwner == uint.MaxValue)
+                        {
+                            //This is the end-of-list node. Continue checking past it.
+                            continue;
+                        }
+                        else
+                        {
+                            //The list node doesn't point to the object itself anymore. Most likely, it has been freed and reused.
+                            cachedListNode.RemoveFromCache();
+                            break;
+                        }
                     }
 
                     result[pTCB] = Type;
                 }
                 catch (Exception ex)
                 {
-                    root.Engine.LogException(ex, $"failed to process TCB node at {pListNode}");
+                    engine.LogException(ex, $"failed to process TCB node at {pListNode}");
                     break;
                 }
             }
@@ -161,7 +169,7 @@ namespace PluginFreeRTOS.LiveWatch
 
             foreach (var list in _ThreadLists)
             {
-                list.Walk(_Root, result, _ProcessedNodes, expectedThreads + 1, _Cache, queryMode);
+                list.Walk(_Root.Engine, result, _ProcessedNodes, expectedThreads + 1, _Cache, queryMode);
             }
 
             if (_IncludeCurrentTCB)
@@ -241,7 +249,7 @@ namespace PluginFreeRTOS.LiveWatch
                 _Cache = linkedListNodeCache;
                 _Address = address;
 
-                _Variable = _Cache._Engine.LiveVariables.CreateLiveVariable(address, _Cache._Length) ?? throw new Exception($"Failed to create live variable at 0x{address:x8}");
+                _Variable = _Cache._Engine.LiveVariables.CreateLiveVariable(address + (uint)_Cache._Start, _Cache._Length) ?? throw new Exception($"Failed to create live variable at 0x{address:x8}");
             }
 
             public bool SuspendUpdating
