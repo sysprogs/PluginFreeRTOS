@@ -57,6 +57,9 @@ namespace PluginFreeRTOS.LiveWatch
                 case "osMutexDef_t":
                 case "os_mutex_def":
                     return new QueueTypeDescriptor(QueueType.Semaphore, false, "controlblock", "os_mutex_def_");
+                case "QueueHandle_t":
+                case "osMessageQId":
+                    return new QueueTypeDescriptor(QueueType.Queue, true);
                 default:
                     return default;
             }
@@ -184,7 +187,8 @@ namespace PluginFreeRTOS.LiveWatch
 
                 return new LiveWatchNodeState
                 {
-                    Value = value
+                    Value = value,
+                    Icon = LiveWatchNodeIcon.Thread,
                 };
             }
 
@@ -327,10 +331,12 @@ namespace PluginFreeRTOS.LiveWatch
 
         private void ProvideWaitingThreadsNodes(QueueType detectedType)
         {
+            bool isActualQueue = detectedType == QueueType.Queue;
+
             if (_ReadThreadQueue?.QueueAddress != _QueueVariable.Address)
-            {
-                _ReadThreadQueue = new WaitingThreadsNode(this, ".readers", "Waiting Threads", "xTasksWaitingToReceive");
-            }
+                _ReadThreadQueue = new WaitingThreadsNode(this, ".readers", isActualQueue ? "Waiting to Read" : "Waiting Threads", "xTasksWaitingToReceive");
+            if (isActualQueue && _WriteThreadQueue?.QueueAddress != _QueueVariable.Address)
+                _WriteThreadQueue = new WaitingThreadsNode(this, ".writers", "Waiting to Write", "xTasksWaitingToSend");
         }
 
         public override void SetSuspendState(LiveWatchNodeSuspendState state)

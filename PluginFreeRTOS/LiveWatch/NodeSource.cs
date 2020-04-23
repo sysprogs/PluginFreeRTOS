@@ -204,7 +204,7 @@ namespace PluginFreeRTOS.LiveWatch
                 hasNodes = _ActiveQueueNodes.Count > 0;
             }
 
-            StateThreadListCache.SuspendUpdating = hasNodes;
+            EventThreadListCache.SuspendUpdating = !hasNodes;
         }
     }
 
