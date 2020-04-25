@@ -43,6 +43,7 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="LiveWatch\FreeRTOSLiveWatchPlugin.cs" />
+    <Compile Include="LiveWatch\HeapNodes.cs" />
     <Compile Include="LiveWatch\KernelNode.cs" />
     <Compile Include="LiveWatch\NodeBase.cs" />
     <Compile Include="LiveWatch\NodeSource.cs" />

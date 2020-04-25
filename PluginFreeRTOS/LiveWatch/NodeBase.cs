@@ -23,7 +23,7 @@ namespace PluginFreeRTOS.LiveWatch
 
         public LiveWatchCapabilities Capabilities { get; protected set; }
 
-        public LiveWatchPhysicalLocation Location { get; protected set; }
+        public virtual LiveWatchPhysicalLocation Location { get; protected set; }
 
         public virtual void Dispose()
         {

@@ -19,7 +19,7 @@ namespace PluginFreeRTOS.LiveWatch
             : base("$rtos.queues")
         {
             _Root = root;
-            Name = "Queues";
+            Name = "Synchronization Primitives";
             Capabilities = LiveWatchCapabilities.CanHaveChildren | LiveWatchCapabilities.DoNotHighlightChangedValue;
         }
 

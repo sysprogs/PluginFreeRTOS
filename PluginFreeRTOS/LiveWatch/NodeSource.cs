@@ -50,7 +50,7 @@ namespace PluginFreeRTOS.LiveWatch
             ThreadList.Locate(_AllThreadLists, engine, engine.Evaluator.LookupVariable("xDelayedTaskList2"), ThreadListType.Delayed, xStateListItem_Offset);
             ThreadList.Locate(_AllThreadLists, engine, engine.Evaluator.LookupVariable("xSuspendedTaskList"), ThreadListType.Suspended, xStateListItem_Offset);
 
-            _Children = new ILiveWatchNode[] { new KernelNode(this, engine), new ThreadListNode(this), new QueueListNode(this) };
+            _Children = new ILiveWatchNode[] { new KernelNode(this, engine), new ThreadListNode(this), new QueueListNode(this), new HeapStructureNode(this) };
         }
 
         public void Dispose()

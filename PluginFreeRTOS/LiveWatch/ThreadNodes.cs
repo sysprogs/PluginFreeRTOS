@@ -41,66 +41,164 @@ namespace PluginFreeRTOS.LiveWatch
 
     class ThreadNode : NodeBase
     {
-        class StackUsageNode : ScalarNodeBase
+        class StackUsageNodeBase : ScalarNodeBase
         {
-            private ThreadNode _ThreadNode;
+            protected readonly ThreadNode _ThreadNode;
 
             int _EstimatedStackSize;
             ulong _pxStack;
             bool _StackSizeQueried;
 
-            void UpdateEstimatedStackSize()
+            protected int ProvideEstimatedStackSize(out ulong pxStack)
             {
-                if (_ThreadNode._Variables.pxStack != null && _ThreadNode._Variables.pxTopOfStack != null)
+                if (!_StackSizeQueried)
                 {
-                    _pxStack = _ThreadNode._Engine.ReadMemory(_ThreadNode._Variables.pxStack).ToUlong();
-                    ulong pxTopOfStack = _ThreadNode._Variables.pxTopOfStack.GetValue().ToUlong();
-                    if (_pxStack != 0 && pxTopOfStack != 0)
+                    _StackSizeQueried = true;
+                    if (_ThreadNode._Variables.pxStack != null && _ThreadNode._Variables.pxTopOfStack != null)
                     {
-                        //The logic below will only work if the stack was allocated from the FreeRTOS heap (tested with heap_4).
-                        uint heapBlockSize = (uint)_ThreadNode._Engine.LiveVariables.ReadMemory(_pxStack - 4, 4).ToUlong();
-                        if ((heapBlockSize & 0x80000000) != 0)
+                        _pxStack = _ThreadNode._Engine.ReadMemory(_ThreadNode._Variables.pxStack).ToUlong();
+                        ulong pxTopOfStack = _ThreadNode._Variables.pxTopOfStackLive.GetValue().ToUlong();
+                        if (_pxStack != 0 && pxTopOfStack != 0)
                         {
-                            _EstimatedStackSize = (int)(heapBlockSize & 0x7FFFFFFF) - 8;
+                            //The logic below will only work if the stack was allocated from the FreeRTOS heap (tested with heap_4).
+                            uint heapBlockSize = (uint)_ThreadNode._Engine.LiveVariables.ReadMemory(_pxStack - 4, 4).ToUlong();
+                            if ((heapBlockSize & 0x80000000) != 0)
+                            {
+                                _EstimatedStackSize = (int)(heapBlockSize & 0x7FFFFFFF) - 8;
+                            }
                         }
                     }
                 }
+
+                pxStack = _pxStack;
+                return _EstimatedStackSize;
             }
 
-            public StackUsageNode(ThreadNode threadNode)
-                : base(threadNode.UniqueID + ".stack")
+            protected StackUsageNodeBase(ThreadNode thread, string idSuffix)
+                : base(thread.UniqueID + idSuffix)
             {
-                _ThreadNode = threadNode;
+                _ThreadNode = thread;
+            }
+        }
+
+        class StackUsageNode : StackUsageNodeBase
+        {
+            public StackUsageNode(ThreadNode threadNode)
+                : base(threadNode, ".stack")
+            {
                 Name = "Stack Usage";
 
                 SelectedFormatter = _ThreadNode._Engine.CreateDefaultFormatter(ScalarVariableType.UInt32);
                 Capabilities |= LiveWatchCapabilities.CanSetBreakpoint | LiveWatchCapabilities.CanPlotValue;
-                _ThreadNode._Variables.pxTopOfStack.SuspendUpdating = false;
+                _ThreadNode._Variables.pxTopOfStackLive.SuspendUpdating = false;
             }
 
             public override void SetSuspendState(LiveWatchNodeSuspendState state)
             {
-                _ThreadNode._Variables.pxTopOfStack.SuspendUpdating = state.SuspendRegularUpdates;
+                _ThreadNode._Variables.pxTopOfStackLive.SuspendUpdating = state.SuspendRegularUpdates;
 
                 base.SetSuspendState(state);
             }
 
             public override LiveWatchNodeState UpdateState(LiveWatchUpdateContext context)
             {
-                var pxTopOfStack = _ThreadNode._Variables.pxTopOfStack.GetValue();
+                var pxTopOfStack = _ThreadNode._Variables.pxTopOfStackLive.GetValue();
+                int estimatedStackSize = ProvideEstimatedStackSize(out var pxStack);
 
-                if (!_StackSizeQueried)
+                int freeStackBytes = (int)(pxTopOfStack.ToUlong() - pxStack);
+
+                //This will be negative if estimatedStackSize is unknown. It is by design to report that we don't know the exact size.
+                RawValue = new LiveVariableValue(pxTopOfStack.Timestamp, pxTopOfStack.Generation, BitConverter.GetBytes(estimatedStackSize - freeStackBytes));
+
+                if (estimatedStackSize == 0)
+                    return new LiveWatchNodeState { Value = $"({freeStackBytes} bytes remaining)" };
+                else
+                    return new LiveWatchNodeState { Value = $"{estimatedStackSize - freeStackBytes}/{estimatedStackSize} bytes" };
+            }
+        }
+
+        class HighestStackUsageNode : StackUsageNodeBase
+        {
+            ILiveVariable _BorderVariable;
+
+            uint UnusedStackFillPatern = 0xA5A5A5A5;
+
+            bool _OverflowDetected, _PatternEverFound;
+
+            public HighestStackUsageNode(ThreadNode threadNode)
+                : base(threadNode, ".stack_highest")
+            {
+                Name = "Highest Stack Usage";
+
+                SelectedFormatter = _ThreadNode._Engine.CreateDefaultFormatter(ScalarVariableType.UInt32);
+                Capabilities |= LiveWatchCapabilities.CanSetBreakpoint | LiveWatchCapabilities.CanPlotValue;
+            }
+
+            public override void SetSuspendState(LiveWatchNodeSuspendState state)
+            {
+                base.SetSuspendState(state);
+            }
+
+            public override void Dispose()
+            {
+                base.Dispose();
+            }
+
+            public override LiveWatchNodeState UpdateState(LiveWatchUpdateContext context)
+            {
+                int estimatedStackSize = ProvideEstimatedStackSize(out var pxStack);
+
+                if (_OverflowDetected)
+                    return ReportStackOverflow(estimatedStackSize);
+
+                var rawValue = _BorderVariable?.GetValue() ?? default;
+
+                if (!rawValue.IsValid || rawValue.ToUlong() != UnusedStackFillPatern)
                 {
-                    UpdateEstimatedStackSize();
-                    _StackSizeQueried = true;
+                    int queriedStackSize;
+                    if (_BorderVariable != null)
+                        queriedStackSize = (int)(_BorderVariable.Address - pxStack);
+                    else
+                        queriedStackSize = (int)(_ThreadNode._Engine.ReadMemory(_ThreadNode._Variables.pxTopOfStack).ToUlong() - pxStack);
+
+                    _BorderVariable?.Dispose();
+                    _BorderVariable = null;
+
+                    if (queriedStackSize < 0)
+                        return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = $"Unexpected stack size ({queriedStackSize})" };
+
+                    var data = _ThreadNode._Engine.LiveVariables.ReadMemory(pxStack, queriedStackSize);
+                    if (!data.IsValid)
+                        return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = $"Failed to read stack contents (0x{pxStack:x8} - 0x{pxStack + (uint)queriedStackSize:x8})" };
+
+                    int offset = 0;
+                    while (offset < (data.Value.Length - 3))
+                    {
+                        uint value = BitConverter.ToUInt32(data.Value, offset);
+                        if (value != UnusedStackFillPatern)
+                            break;
+                        offset += 4;
+                    }
+
+                    //We don't know whether it is a stack overflow, or if the empty stack is never filled with the pattern.
+                    //We assume that if the stack appears overflown from the very beginning, the pattern is not being used at all.
+                    _OverflowDetected = offset == 0;
+                    if (offset != 0)
+                        _PatternEverFound = true;
+
+                    if (offset == 0)
+                        return ReportStackOverflow(estimatedStackSize);
+                    else
+                        _BorderVariable = _ThreadNode._Engine.LiveVariables.CreateLiveVariable(pxStack + (uint)offset - 4, 4, "Stack Border");
                 }
 
-                int stackUsage = (int)(pxTopOfStack.ToUlong() - _pxStack);
-                RawValue = new LiveVariableValue(pxTopOfStack.Timestamp, pxTopOfStack.Generation, BitConverter.GetBytes(stackUsage));
+                int freeStack = (int)(_BorderVariable.Address - pxStack + 4);  /* The border variable watches the 1st free slot, not the 1st used one */
+                int stackUsage = estimatedStackSize - freeStack;
+                RawValue = new LiveVariableValue(rawValue.Timestamp, rawValue.Generation, BitConverter.GetBytes(stackUsage));
 
                 string text;
-                if (_EstimatedStackSize > 0)
-                    text = $"{stackUsage}/{_EstimatedStackSize} bytes";
+                if (estimatedStackSize > 0)
+                    text = $"{stackUsage}/{estimatedStackSize} bytes";
                 else
                     text = $"{stackUsage} bytes";
 
@@ -108,6 +206,12 @@ namespace PluginFreeRTOS.LiveWatch
                 {
                     Value = text
                 };
+            }
+
+            private LiveWatchNodeState ReportStackOverflow(int estimatedStackSize)
+            {
+                RawValue = new LiveVariableValue(DateTime.Now, LiveVariableValue.OutOfScheduleGeneration, BitConverter.GetBytes(estimatedStackSize));
+                return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = _PatternEverFound ? "Stack overflow detected!" : $"Unused stack is not filled with 0x{UnusedStackFillPatern}" };
             }
         }
 
@@ -146,11 +250,12 @@ namespace PluginFreeRTOS.LiveWatch
 
         struct VariableCollection
         {
-            public ILiveVariable pxTopOfStack;
+            public ILiveVariable pxTopOfStackLive;
 
             public IPinnedVariable uxBasePriority;
             public IPinnedVariable uxMutexesHeld;
             public IPinnedVariable pxStack;
+            public IPinnedVariable pxTopOfStack;
         }
 
         VariableCollection _Variables;
@@ -163,7 +268,8 @@ namespace PluginFreeRTOS.LiveWatch
             _TCB = pTCB;
             Name = threadName;
 
-            _Variables.pxTopOfStack = engine.CreateLiveVariable(pTCB.LookupSpecificChild(nameof(_Variables.pxTopOfStack)), LiveVariableFlags.CreateSuspended);
+            _Variables.pxTopOfStack = pTCB.LookupSpecificChild(nameof(_Variables.pxTopOfStack));
+            _Variables.pxTopOfStackLive = engine.CreateLiveVariable(_Variables.pxTopOfStack, LiveVariableFlags.CreateSuspended);
             _Variables.uxBasePriority = pTCB.LookupSpecificChild(nameof(_Variables.uxBasePriority));
             _Variables.uxMutexesHeld = pTCB.LookupSpecificChild(nameof(_Variables.uxMutexesHeld));
             _Variables.pxStack = pTCB.LookupSpecificChild(nameof(_Variables.pxStack));
@@ -186,8 +292,10 @@ namespace PluginFreeRTOS.LiveWatch
             {
                 List<ILiveWatchNode> nodes = new List<ILiveWatchNode>();
                 nodes.Add(new IsRunningNode(this));
-                if (_Variables.pxStack != null && _Variables.pxTopOfStack != null)
+                if (_Variables.pxStack != null && _Variables.pxTopOfStackLive != null)
                     nodes.Add(new StackUsageNode(this));
+                if (_Variables.pxStack != null && _Variables.pxTopOfStack != null)
+                    nodes.Add(new HighestStackUsageNode(this));
 
                 _Children = nodes.Concat(new ILiveWatchNode[]
                 {
@@ -201,7 +309,7 @@ namespace PluginFreeRTOS.LiveWatch
 
         public override void Dispose()
         {
-            _Variables.pxTopOfStack?.Dispose();
+            _Variables.pxTopOfStackLive?.Dispose();
         }
 
         DateTime _LastSeen = DateTime.Now;
