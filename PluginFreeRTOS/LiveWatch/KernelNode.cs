@@ -62,7 +62,7 @@ namespace PluginFreeRTOS.LiveWatch
             {
                 _Variable = variable;
                 _HeapSize = heapSize;
-                SelectedFormatter = engine.CreateDefaultFormatter(ScalarVariableType.SInt32);
+                SelectedFormatter = engine.GetDefaultFormatter(ScalarVariableType.SInt32);
 
                 if (type == HeapNodeType.Current)
                     Name = "Heap Usage";

@@ -88,7 +88,7 @@ namespace PluginFreeRTOS.LiveWatch
             {
                 Name = "Stack Usage";
 
-                SelectedFormatter = _ThreadNode._Engine.CreateDefaultFormatter(ScalarVariableType.UInt32);
+                SelectedFormatter = _ThreadNode._Engine.GetDefaultFormatter(ScalarVariableType.UInt32);
                 Capabilities |= LiveWatchCapabilities.CanSetBreakpoint | LiveWatchCapabilities.CanPlotValue;
                 _ThreadNode._Variables.pxTopOfStackLive.SuspendUpdating = false;
             }
@@ -133,7 +133,7 @@ namespace PluginFreeRTOS.LiveWatch
                 _UnusedStackFillPatern = threadNode._Engine.Settings.UnusedStackFillPattern;
                 _MaxBorderVariableSize = threadNode._Engine.Settings.StackBorderWatchSize;
 
-                SelectedFormatter = _ThreadNode._Engine.CreateDefaultFormatter(ScalarVariableType.UInt32);
+                SelectedFormatter = _ThreadNode._Engine.GetDefaultFormatter(ScalarVariableType.UInt32);
                 Capabilities |= LiveWatchCapabilities.CanSetBreakpoint | LiveWatchCapabilities.CanPlotValue;
             }
 
@@ -238,7 +238,7 @@ namespace PluginFreeRTOS.LiveWatch
                 _ThreadNode = threadNode;
                 Name = "Currently Running";
 
-                SelectedFormatter = _ThreadNode._Engine.CreateDefaultFormatter(ScalarVariableType.UInt8);
+                SelectedFormatter = _ThreadNode._Engine.GetDefaultFormatter(ScalarVariableType.UInt8);
             }
 
             static readonly byte[] True = new byte[] { 1 };

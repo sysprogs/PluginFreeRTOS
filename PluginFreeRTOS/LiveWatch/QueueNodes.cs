@@ -133,7 +133,7 @@ namespace PluginFreeRTOS.LiveWatch
                 var threadListVariable = _Queue._QueueVariable.LookupSpecificChild(memberName);
                 _ThreadList = ThreadList.Locate(_Queue._Engine, threadListVariable, ThreadListType.Event, _Queue._Root.xEventListItem_Offset, true);
                 _Queue._Root.OnQueueNodeSuspended(this, false);
-                SelectedFormatter = _Queue._Engine.CreateDefaultFormatter(ScalarVariableType.SInt32);
+                SelectedFormatter = _Queue._Engine.GetDefaultFormatter(ScalarVariableType.SInt32);
             }
 
             public override void SetSuspendState(LiveWatchNodeSuspendState state)
@@ -216,7 +216,7 @@ namespace PluginFreeRTOS.LiveWatch
             Name = userFriendlyName;
             RawType = _Descriptor.Type.ToString();
             Capabilities = LiveWatchCapabilities.CanHaveChildren | LiveWatchCapabilities.CanPlotValue | LiveWatchCapabilities.CanSetBreakpoint;
-            SelectedFormatter = engine.CreateDefaultFormatter(ScalarVariableType.SInt32);
+            SelectedFormatter = engine.GetDefaultFormatter(ScalarVariableType.SInt32);
             Location = new LiveWatchPhysicalLocation(null, variable.SourceLocation.File, variable.SourceLocation.Line);
         }
 
