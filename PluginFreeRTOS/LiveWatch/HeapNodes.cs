@@ -144,9 +144,9 @@ namespace PluginFreeRTOS.LiveWatch
         {
             _Root = root;
 
-            _ucHeap = root.Engine.Evaluator.LookupVariable("ucHeap");
+            _ucHeap = root.Engine.Symbols.LookupVariable("ucHeap");
 
-            var blockLinkType = root.Engine.Evaluator.LookupType("BlockLink_t");
+            var blockLinkType = root.Engine.Symbols.LookupType("BlockLink_t");
             if (blockLinkType is IPinnedVariableStructType st)
             {
                 _BlockHeaderSize = st.Size;

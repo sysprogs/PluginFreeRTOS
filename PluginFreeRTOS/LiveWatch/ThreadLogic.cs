@@ -249,7 +249,7 @@ namespace PluginFreeRTOS.LiveWatch
                 _Cache = linkedListNodeCache;
                 _Address = address;
 
-                _Variable = _Cache._Engine.LiveVariables.CreateLiveVariable(address + (uint)_Cache._Start, _Cache._Length) ?? throw new Exception($"Failed to create live variable at 0x{address:x8}");
+                _Variable = _Cache._Engine.Memory.CreateLiveVariable(address + (uint)_Cache._Start, _Cache._Length) ?? throw new Exception($"Failed to create live variable at 0x{address:x8}");
             }
 
             public bool SuspendUpdating

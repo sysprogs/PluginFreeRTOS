@@ -227,7 +227,7 @@ namespace PluginFreeRTOS.LiveWatch
                 var address = _PointerVariable.GetValue().ToUlong();
                 if (address != _QueueVariable?.Address)
                 {
-                    _QueueVariable = _Engine.Evaluator.CreateTypedVariable(address, _QueueType);
+                    _QueueVariable = _Engine.Symbols.CreateTypedVariable(address, _QueueType);
                 }
             }
 

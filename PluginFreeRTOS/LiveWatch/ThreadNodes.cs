@@ -61,7 +61,7 @@ namespace PluginFreeRTOS.LiveWatch
                         if (_pxStack != 0 && pxTopOfStack != 0)
                         {
                             //The logic below will only work if the stack was allocated from the FreeRTOS heap (tested with heap_4).
-                            uint heapBlockSize = (uint)_ThreadNode._Engine.LiveVariables.ReadMemory(_pxStack - 4, 4).ToUlong();
+                            uint heapBlockSize = (uint)_ThreadNode._Engine.Memory.ReadMemory(_pxStack - 4, 4).ToUlong();
                             if ((heapBlockSize & 0x80000000) != 0)
                             {
                                 _EstimatedStackSize = (int)(heapBlockSize & 0x7FFFFFFF) - 8;
@@ -183,7 +183,7 @@ namespace PluginFreeRTOS.LiveWatch
                     if (queriedStackSize < 0)
                         return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = $"Unexpected stack size ({queriedStackSize})" };
 
-                    var data = _ThreadNode._Engine.LiveVariables.ReadMemory(pxStack, queriedStackSize);
+                    var data = _ThreadNode._Engine.Memory.ReadMemory(pxStack, queriedStackSize);
                     if (!data.IsValid)
                         return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = $"Failed to read stack contents (0x{pxStack:x8} - 0x{pxStack + (uint)queriedStackSize:x8})" };
 
@@ -201,7 +201,7 @@ namespace PluginFreeRTOS.LiveWatch
                     {
                         int watchSize = Math.Min(_MaxBorderVariableSize, offset);
 
-                        _BorderVariable = _ThreadNode._Engine.LiveVariables.CreateLiveVariable(pxStack + (uint)(offset - watchSize), watchSize, "Stack Border");
+                        _BorderVariable = _ThreadNode._Engine.Memory.CreateLiveVariable(pxStack + (uint)(offset - watchSize), watchSize, "Stack Border");
                     }
                 }
 

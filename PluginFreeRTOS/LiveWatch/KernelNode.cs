@@ -120,14 +120,14 @@ namespace PluginFreeRTOS.LiveWatch
             if (_Children == null)
             {
                 List<ILiveWatchNode> children = new List<ILiveWatchNode>();
-                children.Add(_Engine.CreateNodeForPinnedVariable(_Engine.Evaluator.LookupVariable("uxCurrentNumberOfTasks"), new LiveWatchNodeOverrides { Name = "Total Tasks" }));
-                children.Add(_Engine.CreateNodeForPinnedVariable(_Engine.Evaluator.LookupVariable("xTickCount"), new LiveWatchNodeOverrides { Name = "Tick Count" }));
+                children.Add(_Engine.CreateNodeForPinnedVariable(_Engine.Symbols.LookupVariable("uxCurrentNumberOfTasks"), new LiveWatchNodeOverrides { Name = "Total Tasks" }));
+                children.Add(_Engine.CreateNodeForPinnedVariable(_Engine.Symbols.LookupVariable("xTickCount"), new LiveWatchNodeOverrides { Name = "Tick Count" }));
 
                 var pxCurrentTCB = _Engine.CreateLiveVariable("pxCurrentTCB", false);
                 if (pxCurrentTCB != null)
                     children.Add(new CurrentTaskNode(_Root, pxCurrentTCB));
 
-                var heapVar = _Engine.Evaluator.LookupVariable("ucHeap");
+                var heapVar = _Engine.Symbols.LookupVariable("ucHeap");
                 if (heapVar != null)
                 {
                     int heapSize = heapVar.Size;

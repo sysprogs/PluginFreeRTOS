@@ -27,13 +27,13 @@ namespace PluginFreeRTOS.LiveWatch
         {
             Engine = engine;
 
-            _TCBType = (IPinnedVariableStructType)engine.Evaluator.LookupType("TCB_t", true);
-            _QueueType = (IPinnedVariableStructType)engine.Evaluator.LookupType("Queue_t");
+            _TCBType = (IPinnedVariableStructType)engine.Symbols.LookupType("TCB_t", true);
+            _QueueType = (IPinnedVariableStructType)engine.Symbols.LookupType("Queue_t");
 
             var xStateListItem_Offset = _TCBType.LookupMember("xStateListItem", true).Offset;
             xEventListItem_Offset = _TCBType.LookupMember("xEventListItem", true).Offset;
 
-            var listItemType = (IPinnedVariableStructType)engine.Evaluator.LookupType("ListItem_t", true);
+            var listItemType = (IPinnedVariableStructType)engine.Symbols.LookupType("ListItem_t", true);
             var pvOwner_Offset = (int)listItemType.LookupMember("pvOwner", true).Offset;
             var pxNext_Offset = (int)listItemType.LookupMember("pxNext", true).Offset;
 
@@ -43,12 +43,12 @@ namespace PluginFreeRTOS.LiveWatch
             _pxCurrentTCB = engine.CreateLiveVariable("pxCurrentTCB", true);
             _uxCurrentNumberOfTasks = engine.CreateLiveVariable("uxCurrentNumberOfTasks", true);
 
-            foreach (var pxReadyTaskList in engine.Evaluator.LookupVariable("pxReadyTasksLists")?.LookupChildren(0) ?? new IPinnedVariable[0])
+            foreach (var pxReadyTaskList in engine.Symbols.LookupVariable("pxReadyTasksLists")?.LookupChildren(0) ?? new IPinnedVariable[0])
                 ThreadList.Locate(_AllThreadLists, engine, pxReadyTaskList, ThreadListType.Ready, xStateListItem_Offset);
 
-            ThreadList.Locate(_AllThreadLists, engine, engine.Evaluator.LookupVariable("xDelayedTaskList1"), ThreadListType.Delayed, xStateListItem_Offset);
-            ThreadList.Locate(_AllThreadLists, engine, engine.Evaluator.LookupVariable("xDelayedTaskList2"), ThreadListType.Delayed, xStateListItem_Offset);
-            ThreadList.Locate(_AllThreadLists, engine, engine.Evaluator.LookupVariable("xSuspendedTaskList"), ThreadListType.Suspended, xStateListItem_Offset);
+            ThreadList.Locate(_AllThreadLists, engine, engine.Symbols.LookupVariable("xDelayedTaskList1"), ThreadListType.Delayed, xStateListItem_Offset);
+            ThreadList.Locate(_AllThreadLists, engine, engine.Symbols.LookupVariable("xDelayedTaskList2"), ThreadListType.Delayed, xStateListItem_Offset);
+            ThreadList.Locate(_AllThreadLists, engine, engine.Symbols.LookupVariable("xSuspendedTaskList"), ThreadListType.Suspended, xStateListItem_Offset);
 
             _Children = new ILiveWatchNode[] { new KernelNode(this, engine), new ThreadListNode(this), new QueueListNode(this), new HeapStructureNode(this) };
         }
@@ -84,7 +84,7 @@ namespace PluginFreeRTOS.LiveWatch
 
         string ReadThreadName(ulong TCBAddress, out IPinnedVariable pTCB)
         {
-            pTCB = Engine.Evaluator.CreateTypedVariable(TCBAddress, _TCBType);
+            pTCB = Engine.Symbols.CreateTypedVariable(TCBAddress, _TCBType);
 
             var pcTaskName = pTCB.LookupSpecificChild("pcTaskName");
             string threadName = null;
@@ -147,7 +147,7 @@ namespace PluginFreeRTOS.LiveWatch
         {
             List<QueueNode> discoveredQueues = new List<QueueNode>();
 
-            foreach (var globalVar in Engine.Evaluator.TopLevelVariables)
+            foreach (var globalVar in Engine.Symbols.TopLevelVariables)
             {
                 var qt = QueueListNode.ParseQueueType(globalVar.RawType.ToString());
 
@@ -162,7 +162,7 @@ namespace PluginFreeRTOS.LiveWatch
                     if (child == null)
                         continue;
 
-                    replacementVariable = Engine.Evaluator.CreateTypedVariable(child.Address, _QueueType);
+                    replacementVariable = Engine.Symbols.CreateTypedVariable(child.Address, _QueueType);
                 }
 
                 string name = globalVar.UserFriendlyName;
