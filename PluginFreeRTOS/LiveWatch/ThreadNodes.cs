@@ -121,14 +121,17 @@ namespace PluginFreeRTOS.LiveWatch
         {
             ILiveVariable _BorderVariable;
 
-            uint UnusedStackFillPatern = 0xA5A5A5A5;
-
+            readonly uint _UnusedStackFillPatern;
+            readonly int _MaxBorderVariableSize;
             bool _OverflowDetected, _PatternEverFound;
 
             public HighestStackUsageNode(ThreadNode threadNode)
                 : base(threadNode, ".stack_highest")
             {
                 Name = "Highest Stack Usage";
+
+                _UnusedStackFillPatern = threadNode._Engine.Settings.UnusedStackFillPattern;
+                _MaxBorderVariableSize = threadNode._Engine.Settings.StackBorderWatchSize;
 
                 SelectedFormatter = _ThreadNode._Engine.CreateDefaultFormatter(ScalarVariableType.UInt32);
                 Capabilities |= LiveWatchCapabilities.CanSetBreakpoint | LiveWatchCapabilities.CanPlotValue;
@@ -144,6 +147,19 @@ namespace PluginFreeRTOS.LiveWatch
                 base.Dispose();
             }
 
+            int CountUnusedStackArea(byte[] data)
+            {
+                int offset = 0;
+                while (offset < (data.Length - 3))
+                {
+                    uint value = BitConverter.ToUInt32(data, offset);
+                    if (value != _UnusedStackFillPatern)
+                        return offset;
+                    offset += 4;
+                }
+                return offset;
+            }
+
             public override LiveWatchNodeState UpdateState(LiveWatchUpdateContext context)
             {
                 int estimatedStackSize = ProvideEstimatedStackSize(out var pxStack);
@@ -153,7 +169,7 @@ namespace PluginFreeRTOS.LiveWatch
 
                 var rawValue = _BorderVariable?.GetValue() ?? default;
 
-                if (!rawValue.IsValid || rawValue.ToUlong() != UnusedStackFillPatern)
+                if (!rawValue.IsValid || CountUnusedStackArea(rawValue.Value) != rawValue.Value.Length)
                 {
                     int queriedStackSize;
                     if (_BorderVariable != null)
@@ -171,14 +187,7 @@ namespace PluginFreeRTOS.LiveWatch
                     if (!data.IsValid)
                         return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = $"Failed to read stack contents (0x{pxStack:x8} - 0x{pxStack + (uint)queriedStackSize:x8})" };
 
-                    int offset = 0;
-                    while (offset < (data.Value.Length - 3))
-                    {
-                        uint value = BitConverter.ToUInt32(data.Value, offset);
-                        if (value != UnusedStackFillPatern)
-                            break;
-                        offset += 4;
-                    }
+                    int offset = CountUnusedStackArea(data.Value);
 
                     //We don't know whether it is a stack overflow, or if the empty stack is never filled with the pattern.
                     //We assume that if the stack appears overflown from the very beginning, the pattern is not being used at all.
@@ -189,10 +198,14 @@ namespace PluginFreeRTOS.LiveWatch
                     if (offset == 0)
                         return ReportStackOverflow(estimatedStackSize);
                     else
-                        _BorderVariable = _ThreadNode._Engine.LiveVariables.CreateLiveVariable(pxStack + (uint)offset - 4, 4, "Stack Border");
+                    {
+                        int watchSize = Math.Min(_MaxBorderVariableSize, offset);
+
+                        _BorderVariable = _ThreadNode._Engine.LiveVariables.CreateLiveVariable(pxStack + (uint)(offset - watchSize), watchSize, "Stack Border");
+                    }
                 }
 
-                int freeStack = (int)(_BorderVariable.Address - pxStack + 4);  /* The border variable watches the 1st free slot, not the 1st used one */
+                int freeStack = (int)(_BorderVariable.Address - pxStack) + _BorderVariable.Size;  /* The border variable watches the 1st free slot, not the 1st used one */
                 int stackUsage = estimatedStackSize - freeStack;
                 RawValue = new LiveVariableValue(rawValue.Timestamp, rawValue.Generation, BitConverter.GetBytes(stackUsage));
 
@@ -211,7 +224,7 @@ namespace PluginFreeRTOS.LiveWatch
             private LiveWatchNodeState ReportStackOverflow(int estimatedStackSize)
             {
                 RawValue = new LiveVariableValue(DateTime.Now, LiveVariableValue.OutOfScheduleGeneration, BitConverter.GetBytes(estimatedStackSize));
-                return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = _PatternEverFound ? "Stack overflow detected!" : $"Unused stack is not filled with 0x{UnusedStackFillPatern}" };
+                return new LiveWatchNodeState { Icon = LiveWatchNodeIcon.Error, Value = _PatternEverFound ? "Stack overflow detected!" : $"Unused stack is not filled with 0x{_UnusedStackFillPatern}" };
             }
         }
 
