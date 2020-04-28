@@ -162,7 +162,7 @@ namespace PluginFreeRTOS.LiveWatch
         {
             base.SetSuspendState(state);
             if (_LiveHeap != null)
-                _LiveHeap.SuspendUpdating = state.SuspendRegularUpdates;
+                _LiveHeap.SuspendUpdating = state.SuspendRegularUpdates || !state.IsExpanded;
         }
 
         struct HeapBlockInfo
@@ -209,7 +209,8 @@ namespace PluginFreeRTOS.LiveWatch
 
             ulong heapAddress = _ucHeap.Address;
 
-            int offset = 0;
+            int backPadding = (int)(heapAddress & 7), frontPadding = (8 - backPadding) & 7;
+            int offset = frontPadding;
 
             while (offset <= (contents.Length - _BlockHeaderSize))
             {
@@ -241,8 +242,8 @@ namespace PluginFreeRTOS.LiveWatch
                 offset += increment;
             }
 
-            if (offset != (contents.Length - _BlockHeaderSize))
-                result.Error = $"Unexpected last block address (0x{_ucHeap.Address + (uint)offset} instead of 0x{_ucHeap.Address + (uint)(contents.Length - _BlockHeaderSize)})";
+            if (offset != (contents.Length - _BlockHeaderSize - backPadding))
+                result.Error = $"Unexpected last block address (0x{_ucHeap.Address + (uint)offset:x8} instead of 0x{_ucHeap.Address + (uint)(contents.Length - _BlockHeaderSize):x8})";
 
             result.Blocks = blocks.ToArray();
             return result;
@@ -279,6 +280,12 @@ namespace PluginFreeRTOS.LiveWatch
 
                 result.NewChildren = _Children;
                 result.Value = $"{_ParsedHeapContents.TotalFreeSize} bytes available";
+
+                if (_ParsedHeapContents.Error != null)
+                {
+                    result.Value = _ParsedHeapContents.Error;
+                    result.Icon = LiveWatchNodeIcon.Error;
+                }
             }
             else
                 result.Value = "(expand heap node to see details)";
