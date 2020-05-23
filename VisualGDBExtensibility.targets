@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+	<VisualGDBExtensibilityProjectFile>$(MSBuildThisFileDirectory)..\..\..\products\VisualGDB\VisualGDBExtensibility\VisualGDBExtensibility.csproj</VisualGDBExtensibilityProjectFile>
+  </PropertyGroup>
+  <ItemGroup Condition="Exists('$(VisualGDBExtensibilityProjectFile)')">
+    <ProjectReference Include="$(VisualGDBExtensibilityProjectFile)" >
+      <Project>{a3730282-30bd-4286-b98d-a2e40dacd708}</Project>
+      <Name>VisualGDBExtensibility</Name>
+    </ProjectReference>
+  </ItemGroup>
+  <ItemGroup Condition="(!Exists('$(VisualGDBExtensibilityProjectFile)')) and ('$(VISUALGDB_DIR)' != '')">
+	<Reference Include="VisualGDBExtensibility">
+	  <HintPath>$(VISUALGDB_DIR)\VisualGDBExtensibility.dll</HintPath>
+	</Reference>
+  </ItemGroup>
+  <ItemGroup Condition="(!Exists('$(VisualGDBExtensibilityProjectFile)')) and ('$(VISUALGDB_DIR)' == '')">
+	<Reference Include="VisualGDBExtensibility">
+	  <HintPath>C:\Program Files (x86)\Sysprogs\VisualGDB\VisualGDBExtensibility.dll</HintPath>
+	</Reference>
+  </ItemGroup>
+</Project>

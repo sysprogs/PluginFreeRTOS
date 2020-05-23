@@ -43,10 +43,7 @@
     <Compile Include="Properties\AssemblyInfo.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\..\..\products\VisualGDB\VisualGDBExtensibility\VisualGDBExtensibility.csproj">
-      <Project>{a3730282-30bd-4286-b98d-a2e40dacd708}</Project>
-      <Name>VisualGDBExtensibility</Name>
-    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
+  <Import Project="..\VisualGDBExtensibility.targets" />
 </Project>
