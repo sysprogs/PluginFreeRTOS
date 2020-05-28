@@ -41,13 +41,25 @@ namespace ZephyrThreadPlugin
                 if (_Provider._CalleeSavedLayout == null)
                     return new KeyValuePair<string, ulong>[0];
 
-                var result = _Provider._CalleeSavedLayout.Load(_Evaluator, _ThreadObjectAddress);
+                var baseRegisters = _Provider._CalleeSavedLayout.Load(_Evaluator, _ThreadObjectAddress).ToArray();
+                IEnumerable<KeyValuePair<string, ulong>> result = baseRegisters;
 
-                var sp = result.FirstOrDefault(r => r.Key == "sp").Value;
-                if (sp != 0 && _Provider._ESFLayout != null)
+                int spIndex = -1;
+                for (int i = 0; i < baseRegisters.Length; i++)
                 {
-                    var esfRegisters = _Provider._ESFLayout.Load(_Evaluator, sp);
+                    if (baseRegisters[i].Key == "sp")
+                    {
+                        spIndex = i;
+                        break;
+                    }
+                }
+
+                if (spIndex >= 0 && _Provider._ESFLayout != null)
+                {
+                    var esfRegisters = _Provider._ESFLayout.Load(_Evaluator, baseRegisters[spIndex].Value);
                     result = result.Concat(esfRegisters);
+
+                    baseRegisters[spIndex] = new KeyValuePair<string, ulong>(baseRegisters[spIndex].Key, baseRegisters[spIndex].Value + _Provider._ESFSize);
                 }
 
                 return result;
@@ -144,11 +156,13 @@ namespace ZephyrThreadPlugin
         }
 
         LayoutCache _CalleeSavedLayout, _ESFLayout;
+        private ulong _ESFSize;
 
         public IVirtualThread[] GetVirtualThreads(IGlobalExpressionEvaluator expressionEvaluator)
         {
             _CalleeSavedLayout ??= BuildLayoutCache(expressionEvaluator, "struct k_thread", new[] { "callee_saved.psp=sp" }.Concat(Enumerable.Range(1, 8).Select(i => $"callee_saved.v{i}=r{i + 3}")));
             _ESFLayout ??= BuildLayoutCache(expressionEvaluator, "struct __esf", new[] { "basic.ip=ip", "basic.lr=lr", "basic.pc=pc" }.Concat(Enumerable.Range(1, 4).Select(i => $"basic.a{i}=r{i - 1}")));
+            _ESFSize = expressionEvaluator.EvaluateIntegralExpression("sizeof(struct __esf)") ?? 0;
 
             List<IVirtualThread> result = new List<IVirtualThread>();
 
