@@ -28,6 +28,11 @@ namespace PluginFreeRTOS.LiveWatch
                 SelectedFormatter = _HeapNode._Root.Engine.GetDefaultFormatter(ScalarVariableType.SInt32);
             }
 
+            public HeapMetricNode(HeapStructureNode heapNode, string idSuffix, string name, Func<ParsedHeapState, long> callback)
+                : this(heapNode, idSuffix, name, s => (int)callback(s))
+            {
+            }
+
             public override LiveWatchNodeState UpdateState(LiveWatchUpdateContext context)
             {
                 int value = _Callback(_HeapNode._ParsedHeapContents);
@@ -85,7 +90,7 @@ namespace PluginFreeRTOS.LiveWatch
                 return "???";
 
             StringBuilder result = new StringBuilder();
-            for (int i = blk.Offset; i < (blk.Offset + blk.Size) && i < data.Length; i++)
+            for (long i = blk.Offset; i < (blk.Offset + blk.Size) && i < data.Length; i++)
             {
                 result.AppendFormat("{0:x2} ", data[i]);
                 if (result.Length > 16)
@@ -167,11 +172,11 @@ namespace PluginFreeRTOS.LiveWatch
 
         struct HeapBlockInfo
         {
-            public readonly int Offset;
-            public readonly int Size;
+            public readonly long Offset;
+            public readonly long Size;
             public readonly bool IsAllocated;
 
-            public HeapBlockInfo(int offset, int size, bool isAllocated)
+            public HeapBlockInfo(int offset, long size, bool isAllocated)
             {
                 Offset = offset;
                 Size = size;
@@ -188,9 +193,9 @@ namespace PluginFreeRTOS.LiveWatch
         {
             public HeapBlockInfo[] Blocks;
             public string Error;
-            public int TotalFreeBlocks, TotalUsedBlocks;
-            public int TotalFreeSize, TotalUsedSize;
-            public int MaxFreeBlock, MaxUsedBlock;
+            public long TotalFreeBlocks, TotalUsedBlocks;
+            public long TotalFreeSize, TotalUsedSize;
+            public long MaxFreeBlock, MaxUsedBlock;
         }
 
         public override void Dispose()
@@ -198,6 +203,8 @@ namespace PluginFreeRTOS.LiveWatch
             base.Dispose();
             _LiveHeap?.Dispose();
         }
+
+        public static ulong GetBlockAllocatedMask(bool is64Bit) => 1UL << (is64Bit ? 63 : 31);
 
         ParsedHeapState ParseHeapContents(byte[] contents)
         {
@@ -209,7 +216,18 @@ namespace PluginFreeRTOS.LiveWatch
 
             ulong heapAddress = _ucHeap.Address;
 
-            int backPadding = (int)(heapAddress & 7), frontPadding = (8 - backPadding) & 7;
+            int heapAlignment = 8;
+            bool is64Bit = false;
+            if (_BlockHeaderSize >= 16)
+            {
+                heapAlignment = 16;
+                is64Bit = true;
+            }
+
+            ulong allocatedMask = GetBlockAllocatedMask(is64Bit);
+
+            int backPadding = (int)(heapAddress & ((uint)heapAlignment - 1)), frontPadding = (heapAlignment - backPadding) & (heapAlignment - 1);
+
             int offset = frontPadding;
 
             while (offset <= (contents.Length - _BlockHeaderSize))
@@ -217,14 +235,18 @@ namespace PluginFreeRTOS.LiveWatch
                 if (offset < 0)
                     offset = 0;
 
-                uint pxNextFreeBlock = BitConverter.ToUInt32(contents, offset + _NextFieldOffset);
-                uint xBlockSize = BitConverter.ToUInt32(contents, offset + _SizeFieldOffset);
+                //ulong pxNextFreeBlock = BitConverter.ToUInt32(contents, offset + _NextFieldOffset);
+                ulong xBlockSize;
+                if (is64Bit)
+                    xBlockSize = BitConverter.ToUInt64(contents, offset + _SizeFieldOffset);
+                else
+                    xBlockSize = BitConverter.ToUInt32(contents, offset + _SizeFieldOffset);
 
                 int increment = (int)(xBlockSize & 0x7FFFFFFF);
                 if (increment <= 0)
                     break;
 
-                var block = new HeapBlockInfo(offset + _BlockHeaderSize, increment - _BlockHeaderSize, (xBlockSize & 0x80000000U) != 0);
+                var block = new HeapBlockInfo(offset + _BlockHeaderSize, increment - _BlockHeaderSize, (xBlockSize & allocatedMask) != 0);
                 blocks.Add(block);
                 if (block.IsAllocated)
                 {

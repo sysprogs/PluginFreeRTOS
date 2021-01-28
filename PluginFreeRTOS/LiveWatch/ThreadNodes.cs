@@ -56,15 +56,17 @@ namespace PluginFreeRTOS.LiveWatch
                     _StackSizeQueried = true;
                     if (_ThreadNode._Variables.pxStack != null && _ThreadNode._Variables.pxTopOfStack != null)
                     {
+                        int pointerSize = _ThreadNode._Variables.pxStack.Size;
+                        ulong allocatedMask = HeapStructureNode.GetBlockAllocatedMask(pointerSize >= 8);
                         _pxStack = _ThreadNode._Engine.ReadMemory(_ThreadNode._Variables.pxStack).ToUlong();
                         ulong pxTopOfStack = _ThreadNode._Variables.pxTopOfStackLive.GetValue().ToUlong();
                         if (_pxStack != 0 && pxTopOfStack != 0)
                         {
                             //The logic below will only work if the stack was allocated from the FreeRTOS heap (tested with heap_4).
-                            uint heapBlockSize = (uint)_ThreadNode._Engine.Memory.ReadMemory(_pxStack - 4, 4).ToUlong();
-                            if ((heapBlockSize & 0x80000000) != 0)
+                            ulong heapBlockSize = _ThreadNode._Engine.Memory.ReadMemory(_pxStack - (uint)pointerSize, pointerSize).ToUlong();
+                            if ((heapBlockSize & allocatedMask) != 0)
                             {
-                                _EstimatedStackSize = (int)(heapBlockSize & 0x7FFFFFFF) - 8;
+                                _EstimatedStackSize = (int)(heapBlockSize & ~allocatedMask) - 2 * pointerSize;
                             }
                         }
                     }
@@ -105,7 +107,7 @@ namespace PluginFreeRTOS.LiveWatch
                 var pxTopOfStack = _ThreadNode._Variables.pxTopOfStackLive.GetValue();
                 int estimatedStackSize = ProvideEstimatedStackSize(out var pxStack);
 
-                int freeStackBytes = (int)(pxTopOfStack.ToUlong() - pxStack);
+                long freeStackBytes = (long)(pxTopOfStack.ToUlong() - pxStack);
 
                 //This will be negative if estimatedStackSize is unknown. It is by design to report that we don't know the exact size.
                 RawValue = new LiveVariableValue(pxTopOfStack.Timestamp, pxTopOfStack.Generation, BitConverter.GetBytes(estimatedStackSize - freeStackBytes));
