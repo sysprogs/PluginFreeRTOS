@@ -40,7 +40,8 @@ namespace PluginFreeRTOS
     enum StackLayout
     {
         WithOptionalFPU,
-        WithoutFPU
+        WithoutFPU,
+        CortexA53,
     }
 
     public class VirtualThreadProvider : IVirtualThreadProvider2
@@ -159,6 +160,8 @@ namespace PluginFreeRTOS
                     _StackLayout = StackLayout.WithoutFPU;
                 else if (disassemblyLines >= 30 && disassemblyLines <= 33)
                     _StackLayout = StackLayout.WithOptionalFPU;
+                else if (e.EvaluateIntegralExpression("sizeof(void *)") == 8)
+                    _StackLayout = StackLayout.CortexA53;
                 else
                 {
                     var cpu = GetCPUType(e);
@@ -243,16 +246,130 @@ namespace PluginFreeRTOS
                               _SavedSP, slotNumber)).Value;
         }
 
-        public IEnumerable<KeyValuePair<string, ulong>>
-             GetSavedRegisters()
+        class StackLayoutBuilder
         {
-            List<KeyValuePair<string, ulong>> result =
-                new List<KeyValuePair<string, ulong>>();
+            struct RegisterRecord
+            {
+                public readonly string Name;
+                public readonly int Offset;
+                public readonly int Size;
+                public int EndOffset => Offset + Size;
+
+                public RegisterRecord(string name, int offset, int size)
+                {
+                    Name = name;
+                    Offset = offset;
+                    Size = size;
+                }
+
+                public override string ToString()
+                {
+                    return $"{Name} @{Offset}";
+                }
+            }
+
+            List<RegisterRecord> _AllRegisters = new List<RegisterRecord>();
+            int _Position;
+            private int _DefaultRegisterSize;
+
+            public StackLayoutBuilder(int defaultRegisterSize)
+            {
+                _DefaultRegisterSize = defaultRegisterSize;
+            }
+
+            public void AddRegisters(string prefix, int first, int last, int? sizePerRegister = null)
+            {
+                for (int i = first; i <= last; i++)
+                    AddSingleRegister(prefix + i, sizePerRegister ?? _DefaultRegisterSize);
+            }
+
+            public void AddZigZagRegisterSequence(string prefix, int first, int last, int? sizePerRegister = null)
+            {
+                for (int i = first - 1; i >= last; i -= 2)
+                {
+                    AddSingleRegister(prefix + i, sizePerRegister ?? _DefaultRegisterSize);
+                    AddSingleRegister(prefix + (i + 1), sizePerRegister ?? _DefaultRegisterSize);
+                }
+            }
+
+            public void AddSingleRegister(string name, int? sizeOverride = null)
+            {
+                int size = sizeOverride ?? _DefaultRegisterSize;
+                var reg = new RegisterRecord(name, _Position, size);
+                _AllRegisters.Add(reg);
+                _Position += size;
+            }
+
+            public void AddRegisters(params string[] registers)
+            {
+                foreach (var reg in registers)
+                    AddSingleRegister(reg);
+            }
+
+            public void Skip(int? bytes = null)
+            {
+                _Position += (bytes ?? _DefaultRegisterSize);
+            }
+
+            public void VerifyPosition(int expectedPosition)
+            {
+                System.Diagnostics.Debug.Assert(_Position == expectedPosition);
+            }
+
+            public IEnumerable<KeyValuePair<string, ulong>> FetchValues(ulong sp, IGlobalExpressionEvaluator evaluator)
+            {
+                var bytes = evaluator.ReadMemoryBlock($"0x{sp:x8}", _Position) ?? new byte[0];
+                List<KeyValuePair<string, ulong>> result = new List<KeyValuePair<string, ulong>>();
+                foreach (var rec in _AllRegisters)
+                {
+                    if (rec.EndOffset > bytes.Length)
+                        continue;   //Unavailable
+
+                    switch (rec.Size)
+                    {
+                        case 4:
+                            result.Add(new KeyValuePair<string, ulong>(rec.Name, BitConverter.ToUInt32(bytes, rec.Offset)));
+                            break;
+                        case 8:
+                            result.Add(new KeyValuePair<string, ulong>(rec.Name, BitConverter.ToUInt64(bytes, rec.Offset)));
+                            break;
+                    }
+                }
+
+                result.Add(new KeyValuePair<string, ulong>("sp", sp + (ulong)_Position));
+                return result;
+            }
+        }
+
+
+        public IEnumerable<KeyValuePair<string, ulong>> GetSaved64BitRegisters()
+        {
+            StackLayoutBuilder builder = new StackLayoutBuilder(8);
+
+            var tmpBlock = _Evaluator.ReadMemoryBlock($"0x{_SavedSP:x8}", 16);
+            builder.Skip(16);
+
+            if (BitConverter.ToUInt64(tmpBlock, 0) != 0)
+                builder.AddZigZagRegisterSequence("q", 31, 0);
+
+            builder.AddSingleRegister("pc");
+            builder.Skip();
+            builder.AddZigZagRegisterSequence("x", 31, 0);
+            builder.VerifyPosition(0x120);
+            return builder.FetchValues(_SavedSP, _Evaluator);
+        }
+
+        public IEnumerable<KeyValuePair<string, ulong>> GetSavedRegisters()
+        {
+            List<KeyValuePair<string, ulong>> result = new List<KeyValuePair<string, ulong>>();
             bool stackPadding = false;
             UInt64 savedSPCache;
 
             if (_IsRunning)
                 return null;
+
+            if (_StackLayout == StackLayout.CortexA53)
+                return GetSaved64BitRegisters();
 
             // Saved register order for ARM Cortex processors:
             // ARM Cortex-M0 and Cortex-M3: r4-r11,r0-r3,r12,r14,r15,xPSR
@@ -272,8 +389,7 @@ namespace PluginFreeRTOS
             for (int stackPos = 0; stackPos < 8; stackPos++)
             {
                 ulong val = GetSavedRegister(stackPos);
-                result.Add(new KeyValuePair<string, ulong>(registers[stackPos],
-                                                           val));
+                result.Add(new KeyValuePair<string, ulong>(registers[stackPos], val));
             }
 
             stackOffset = 8;

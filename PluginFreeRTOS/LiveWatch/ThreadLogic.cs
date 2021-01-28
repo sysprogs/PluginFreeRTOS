@@ -298,7 +298,6 @@ namespace PluginFreeRTOS.LiveWatch
 
         public void Dispose()
         {
-            throw new NotImplementedException();
         }
     }
 }
