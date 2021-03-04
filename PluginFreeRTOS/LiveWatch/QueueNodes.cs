@@ -51,6 +51,7 @@ namespace PluginFreeRTOS.LiveWatch
                     return new QueueTypeDescriptor(QueueType.Mutex, true);
                 case "SemaphoreHandle_t":
                 case "osSemaphoreId":
+                case "osSemaphoreId_t":
                     return new QueueTypeDescriptor(QueueType.Semaphore, true);
                 case "osSemaphoreDef_t":
                 case "os_semaphore_def":
