@@ -47,6 +47,7 @@ namespace PluginFreeRTOS.LiveWatch
             switch (type)
             {
                 case "osMutexId":
+                case "osMutexId_t":
                     return new QueueTypeDescriptor(QueueType.Mutex, true);
                 case "SemaphoreHandle_t":
                 case "osSemaphoreId":
@@ -59,6 +60,7 @@ namespace PluginFreeRTOS.LiveWatch
                     return new QueueTypeDescriptor(QueueType.Semaphore, false, "controlblock", "os_mutex_def_");
                 case "QueueHandle_t":
                 case "osMessageQId":
+                case "osMessageQueueId_t":
                     return new QueueTypeDescriptor(QueueType.Queue, true);
                 default:
                     return default;
@@ -224,7 +226,7 @@ namespace PluginFreeRTOS.LiveWatch
         {
             if (_PointerVariable != null)
             {
-                var address = _PointerVariable.GetValue().ToUlong();
+                var address = _PointerVariable.GetValue().ToUlong() & ~1UL;
                 if (address != _QueueVariable?.Address)
                 {
                     _QueueVariable = _Engine.Symbols.CreateTypedVariable(address, _QueueType);
