@@ -48,7 +48,7 @@ namespace PluginFreeRTOS.LiveWatch
             int _EstimatedStackSize;
             ulong _pxStack;
             bool _StackSizeQueried;
-
+            
             protected int ProvideEstimatedStackSize(out ulong pxStack)
             {
                 if (!_StackSizeQueried)
@@ -62,11 +62,20 @@ namespace PluginFreeRTOS.LiveWatch
                         ulong pxTopOfStack = _ThreadNode._Variables.pxTopOfStackLive.GetValue().ToUlong();
                         if (_pxStack != 0 && pxTopOfStack != 0)
                         {
-                            //The logic below will only work if the stack was allocated from the FreeRTOS heap (tested with heap_4).
-                            ulong heapBlockSize = _ThreadNode._Engine.Memory.ReadMemory(_pxStack - (uint)pointerSize, pointerSize).ToUlong();
-                            if ((heapBlockSize & allocatedMask) != 0)
+                            if (_ThreadNode._ucHeap != null && _pxStack >= _ThreadNode._ucHeap.Address && _pxStack < (_ThreadNode._ucHeap.Address + (uint)_ThreadNode._ucHeap.Size))
                             {
-                                _EstimatedStackSize = (int)(heapBlockSize & ~allocatedMask) - 2 * pointerSize;
+                                //The logic below will only work if the stack was allocated from the FreeRTOS heap (tested with heap_4).
+                                ulong heapBlockSize = _ThreadNode._Engine.Memory.ReadMemory(_pxStack - (uint)pointerSize, pointerSize).ToUlong();
+                                if ((heapBlockSize & allocatedMask) != 0)
+                                {
+                                    _EstimatedStackSize = (int)(heapBlockSize & ~allocatedMask) - 2 * pointerSize;
+                                }
+                            }
+                            else
+                            {
+                                var fixedStackVariable = _ThreadNode._Engine.Symbols.TopLevelVariables.FirstOrDefault(v => v.Address == _pxStack && v.Size != 0);
+                                if (fixedStackVariable != null)
+                                    _EstimatedStackSize = fixedStackVariable.Size;
                             }
                         }
                     }
@@ -260,7 +269,7 @@ namespace PluginFreeRTOS.LiveWatch
 
         private readonly ILiveWatchEngine _Engine;
         readonly IPinnedVariable _TCB;
-
+        private readonly IPinnedVariable _ucHeap;
         ILiveWatchNode[] _Children;
 
         struct VariableCollection
@@ -275,12 +284,12 @@ namespace PluginFreeRTOS.LiveWatch
 
         VariableCollection _Variables;
 
-
-        public ThreadNode(ILiveWatchEngine engine, IPinnedVariable pTCB, string threadName)
+        public ThreadNode(ILiveWatchEngine engine, IPinnedVariable pTCB, string threadName, IPinnedVariable ucHeap)
             : base("$rtos.thread." + threadName)
         {
             _Engine = engine;
             _TCB = pTCB;
+            _ucHeap = ucHeap;
             Name = threadName;
 
             _Variables.pxTopOfStack = pTCB.LookupSpecificChild(nameof(_Variables.pxTopOfStack));

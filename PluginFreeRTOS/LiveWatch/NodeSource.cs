@@ -114,6 +114,9 @@ namespace PluginFreeRTOS.LiveWatch
             return name;
         }
 
+        bool _HeapQueried = false;
+        private IPinnedVariable _ucHeap;
+
         public ThreadNode[] RefreshThreadList()
         {
             var foundThreads = new ThreadLookup(this, _AllThreadLists, true, StateThreadListCache).DiscoverAllThreads();
@@ -121,10 +124,16 @@ namespace PluginFreeRTOS.LiveWatch
 
             foreach (var thr in foundThreads)
             {
+                if (!_HeapQueried)
+                {
+                    _HeapQueried = true;
+                    _ucHeap = Engine.Symbols.LookupVariable("ucHeap");
+                }
+
                 if (!_CachedThreadNodes.TryGetValue(thr.Key, out var threadObject))
                 {
                     string threadName = ReadThreadName(thr.Key, out var pTCB);
-                    _CachedThreadNodes[thr.Key] = threadObject = new ThreadNode(Engine, pTCB, threadName);
+                    _CachedThreadNodes[thr.Key] = threadObject = new ThreadNode(Engine, pTCB, threadName, _ucHeap);
                 }
 
                 threadObject.UpdateLastSeenState(thr.Value, generation);
@@ -151,7 +160,7 @@ namespace PluginFreeRTOS.LiveWatch
             {
                 var qt = QueueListNode.ParseQueueType(globalVar.RawType.ToString());
 
-                if (qt.Type == QueueType.Invalid)
+                if (!qt.IsValid)
                     continue;
 
                 IPinnedVariable replacementVariable = null;

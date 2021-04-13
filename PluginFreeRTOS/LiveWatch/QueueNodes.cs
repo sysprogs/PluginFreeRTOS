@@ -48,7 +48,7 @@ namespace PluginFreeRTOS.LiveWatch
             {
                 case "osMutexId":
                 case "osMutexId_t":
-                    return new QueueTypeDescriptor(QueueType.Mutex, true);
+                    return new QueueTypeDescriptor(QueueType.RecursiveMutex, true);
                 case "SemaphoreHandle_t":
                 case "osSemaphoreId":
                 case "osSemaphoreId_t":
@@ -62,7 +62,9 @@ namespace PluginFreeRTOS.LiveWatch
                 case "QueueHandle_t":
                 case "osMessageQId":
                 case "osMessageQueueId_t":
-                    return new QueueTypeDescriptor(QueueType.Queue, true);
+                    return new QueueTypeDescriptor(QueueType.BaseQueue, true);
+                case "StaticQueue_t":
+                    return new QueueTypeDescriptor(QueueType.BaseQueue, false, typeOverride: "QueueDefinition");
                 default:
                     return default;
             }
@@ -71,12 +73,11 @@ namespace PluginFreeRTOS.LiveWatch
 
     enum QueueType  //The raw values must match the queueQUEUE_TYPE_XXX macros from queue.h
     {
-        Invalid = 0,
-
-        Queue = 1,
+        BaseQueue = 0,
+        NonRecursiveMutex = 1,
         Semaphore = 2,
         BinarySemaphore = 3,
-        Mutex = 4,
+        RecursiveMutex = 4,
     }
 
     class QueueNode : ScalarNodeBase
@@ -213,6 +214,8 @@ namespace PluginFreeRTOS.LiveWatch
 
             if (_Descriptor.IsIndirect)
                 _PointerVariable = engine.CreateLiveVariable(variable);
+            else if (_Descriptor.TypeOverride != null)
+                _QueueVariable = engine.Symbols.CreateTypedVariable(variable.Address, engine.Symbols.LookupType(_Descriptor.TypeOverride, true));
             else
                 _QueueVariable = variable;
 
@@ -222,6 +225,8 @@ namespace PluginFreeRTOS.LiveWatch
             SelectedFormatter = engine.GetDefaultFormatter(ScalarVariableType.SInt32);
             Location = new LiveWatchPhysicalLocation(null, variable.SourceLocation.File, variable.SourceLocation.Line);
         }
+
+        QueueType? _StaticType;
 
         public override LiveWatchNodeState UpdateState(LiveWatchUpdateContext context)
         {
@@ -265,13 +270,24 @@ namespace PluginFreeRTOS.LiveWatch
                 result.Value = "???";
             else
             {
-                var detectedType = _Descriptor.Type;
+                if (_Descriptor.TypeOverride != null && !_StaticType.HasValue)
+                {
+                    var typeVar = _QueueVariable.LookupSpecificChild("ucQueueType");
+                    if (typeVar != null)
+                    {
+                        _StaticType = (QueueType)_Engine.ReadMemory(typeVar).ToUlong();
+                        RawType = _StaticType.Value.ToString();
+                    }
+                }
+
+                var detectedType = _StaticType ?? _Descriptor.Type;
+
                 var rawValue = _Variables.uxMessagesWaiting.GetValue();
                 int value = (int)rawValue.ToUlong();
                 int maxValue = (int)_Variables.uxLength.GetValue().ToUlong();
                 ulong owner = 0, level = 0;
 
-                if (detectedType != QueueType.Queue && _Variables.u_xSemaphore_xMutexHolder != null && _Variables.u_xSemaphore_uxRecursiveCallCount != null)
+                if (detectedType != QueueType.BaseQueue && _Variables.u_xSemaphore_xMutexHolder != null && _Variables.u_xSemaphore_uxRecursiveCallCount != null)
                 {
                     owner = _Variables.u_xSemaphore_xMutexHolder.GetValue().ToUlong();
                     level = _Variables.u_xSemaphore_uxRecursiveCallCount.GetValue().ToUlong();
@@ -279,10 +295,10 @@ namespace PluginFreeRTOS.LiveWatch
                     if (owner == _QueueVariable.Address)
                         detectedType = QueueType.Semaphore;
                     else
-                        detectedType = QueueType.Mutex;
+                        detectedType = QueueType.RecursiveMutex;
                 }
 
-                if (detectedType == QueueType.Mutex)
+                if (detectedType == QueueType.RecursiveMutex || detectedType == QueueType.NonRecursiveMutex)
                 {
                     if (value != 0)
                     {
@@ -313,10 +329,11 @@ namespace PluginFreeRTOS.LiveWatch
                 {
                     case QueueType.BinarySemaphore:
                     case QueueType.Semaphore:
-                    case QueueType.Mutex:
+                    case QueueType.RecursiveMutex:
+                    case QueueType.NonRecursiveMutex:
                         result.Icon = LiveWatchNodeIcon.Flag;
                         break;
-                    case QueueType.Queue:
+                    case QueueType.BaseQueue:
                         result.Icon = LiveWatchNodeIcon.Queue;
                         break;
                 }
@@ -334,7 +351,7 @@ namespace PluginFreeRTOS.LiveWatch
 
         private void ProvideWaitingThreadsNodes(QueueType detectedType)
         {
-            bool isActualQueue = detectedType == QueueType.Queue;
+            bool isActualQueue = detectedType == QueueType.BaseQueue;
 
             if (_ReadThreadQueue?.QueueAddress != _QueueVariable.Address)
                 _ReadThreadQueue = new WaitingThreadsNode(this, ".readers", isActualQueue ? "Waiting to Read" : "Waiting Threads", "xTasksWaitingToReceive");
@@ -366,17 +383,21 @@ namespace PluginFreeRTOS.LiveWatch
     struct QueueTypeDescriptor
     {
         public readonly QueueType Type;
+        public readonly bool IsValid;
         public readonly bool IsIndirect;
+        public readonly string TypeOverride;
         public readonly string ContentsMemberName;
 
         public readonly string DiscardedNamePrefix;
 
-        public QueueTypeDescriptor(QueueType type, bool isIndirect, string contentsMemberName = null, string discardedNamePrefix = null)
+        public QueueTypeDescriptor(QueueType type, bool isIndirect, string contentsMemberName = null, string discardedNamePrefix = null, string typeOverride = null)
         {
+            IsValid = true;
             Type = type;
             IsIndirect = isIndirect;
             ContentsMemberName = contentsMemberName;
             DiscardedNamePrefix = discardedNamePrefix;
+            TypeOverride = typeOverride;
         }
     }
 }
