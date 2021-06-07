@@ -166,7 +166,7 @@ namespace ZephyrThreadPlugin
 
             List<IVirtualThread> result = new List<IVirtualThread>();
 
-            var pCurrentThread = expressionEvaluator.EvaluateIntegralExpression("_kernel.current");
+            var pCurrentThread = expressionEvaluator.EvaluateIntegralExpression("_kernel.current") ?? expressionEvaluator.EvaluateIntegralExpression("_kernel.cpus[0].current");
             if (!pCurrentThread.HasValue || pCurrentThread == 0)
                 return new IVirtualThread[0];
 
